@@ -17,6 +17,7 @@ type MockProvider struct {
 	ConsentRequests    map[string]*client.OAuth2ConsentRequest
 	LogoutRequests     map[string]*client.OAuth2LogoutRequest
 	IntrospectedTokens map[string]*client.IntrospectedOAuth2Token
+	OAuth2Clients      map[string]*client.OAuth2Client // client_id -> client
 
 	// Track accepted/rejected
 	AcceptedLogins   map[string]string   // challenge -> subject
@@ -27,16 +28,19 @@ type MockProvider struct {
 	RejectedLogouts  map[string]bool
 
 	// Error injection
-	GetLoginRequestErr   error
-	AcceptLoginErr       error
-	RejectLoginErr       error
-	GetConsentRequestErr error
-	AcceptConsentErr     error
-	RejectConsentErr     error
-	GetLogoutRequestErr  error
-	AcceptLogoutErr      error
-	RejectLogoutErr      error
-	IntrospectTokenErr   error
+	GetLoginRequestErr    error
+	AcceptLoginErr        error
+	RejectLoginErr        error
+	GetConsentRequestErr  error
+	AcceptConsentErr      error
+	RejectConsentErr      error
+	GetLogoutRequestErr   error
+	AcceptLogoutErr       error
+	RejectLogoutErr       error
+	IntrospectTokenErr    error
+	CreateOAuth2ClientErr error
+	ListOAuth2ClientsErr  error
+	DeleteOAuth2ClientErr error
 
 	// Default redirect URL
 	RedirectURL string
@@ -49,6 +53,7 @@ func NewMockProvider() *MockProvider {
 		ConsentRequests:    make(map[string]*client.OAuth2ConsentRequest),
 		LogoutRequests:     make(map[string]*client.OAuth2LogoutRequest),
 		IntrospectedTokens: make(map[string]*client.IntrospectedOAuth2Token),
+		OAuth2Clients:      make(map[string]*client.OAuth2Client),
 		AcceptedLogins:     make(map[string]string),
 		AcceptedConsents:   make(map[string][]string),
 		AcceptedLogouts:    make(map[string]bool),
@@ -285,6 +290,61 @@ func (m *MockProvider) IntrospectToken(ctx context.Context, token string, scope 
 	return result, nil
 }
 
+// CreateOAuth2Client creates a mock OAuth2 client
+func (m *MockProvider) CreateOAuth2Client(ctx context.Context, clientID, clientSecret, clientName string, grantTypes, responseTypes, redirectURIs []string, scope, tokenEndpointAuthMethod string) (*client.OAuth2Client, error) {
+	if m.CreateOAuth2ClientErr != nil {
+		return nil, m.CreateOAuth2ClientErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	c := client.NewOAuth2Client()
+	c.SetClientId(clientID)
+	c.SetClientSecret(clientSecret)
+	c.SetClientName(clientName)
+	c.SetGrantTypes(grantTypes)
+	c.SetResponseTypes(responseTypes)
+	c.SetRedirectUris(redirectURIs)
+	c.SetScope(scope)
+	c.SetTokenEndpointAuthMethod(tokenEndpointAuthMethod)
+
+	m.OAuth2Clients[clientID] = c
+	return c, nil
+}
+
+// ListOAuth2Clients lists all mock OAuth2 clients
+func (m *MockProvider) ListOAuth2Clients(ctx context.Context) ([]client.OAuth2Client, error) {
+	if m.ListOAuth2ClientsErr != nil {
+		return nil, m.ListOAuth2ClientsErr
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	clients := make([]client.OAuth2Client, 0, len(m.OAuth2Clients))
+	for _, c := range m.OAuth2Clients {
+		clients = append(clients, *c)
+	}
+	return clients, nil
+}
+
+// DeleteOAuth2Client deletes a mock OAuth2 client
+func (m *MockProvider) DeleteOAuth2Client(ctx context.Context, clientID string) error {
+	if m.DeleteOAuth2ClientErr != nil {
+		return m.DeleteOAuth2ClientErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.OAuth2Clients[clientID]; !exists {
+		return fmt.Errorf("client not found: %s", clientID)
+	}
+	delete(m.OAuth2Clients, clientID)
+	return nil
+}
+
 // Reset clears all mock data
 func (m *MockProvider) Reset() {
 	m.mu.Lock()
@@ -294,6 +354,7 @@ func (m *MockProvider) Reset() {
 	m.ConsentRequests = make(map[string]*client.OAuth2ConsentRequest)
 	m.LogoutRequests = make(map[string]*client.OAuth2LogoutRequest)
 	m.IntrospectedTokens = make(map[string]*client.IntrospectedOAuth2Token)
+	m.OAuth2Clients = make(map[string]*client.OAuth2Client)
 	m.AcceptedLogins = make(map[string]string)
 	m.AcceptedConsents = make(map[string][]string)
 	m.AcceptedLogouts = make(map[string]bool)
@@ -311,6 +372,9 @@ func (m *MockProvider) Reset() {
 	m.AcceptLogoutErr = nil
 	m.RejectLogoutErr = nil
 	m.IntrospectTokenErr = nil
+	m.CreateOAuth2ClientErr = nil
+	m.ListOAuth2ClientsErr = nil
+	m.DeleteOAuth2ClientErr = nil
 }
 
 // Ensure MockProvider implements Provider

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -477,4 +478,146 @@ func (ctrl *OAuthProviderController) OAuthLogout(c *gin.Context) {
 // Configure via HydraTrustedClients setting (comma-separated client IDs)
 func isTrustedOAuthClient(clientID string) bool {
 	return slices.Contains(common.HydraTrustedClients, clientID)
+}
+
+// OAuthRegisterClientRequest represents the request to register an OAuth client
+type OAuthRegisterClientRequest struct {
+	ClientID                string   `json:"client_id"`
+	ClientSecret            string   `json:"client_secret"`
+	ClientName              string   `json:"client_name"`
+	GrantTypes              []string `json:"grant_types"`
+	ResponseTypes           []string `json:"response_types"`
+	RedirectURIs            []string `json:"redirect_uris"`
+	Scope                   string   `json:"scope"`
+	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
+}
+
+// OAuthRegisterClient handles POST /oauth/admin/clients - registers a new OAuth client (admin only)
+func (ctrl *OAuthProviderController) OAuthRegisterClient(c *gin.Context) {
+	var req OAuthRegisterClientRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "invalid request: " + err.Error(),
+		})
+		return
+	}
+
+	if req.ClientID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "client_id is required",
+		})
+		return
+	}
+
+	// Set defaults
+	if len(req.GrantTypes) == 0 {
+		req.GrantTypes = []string{"authorization_code", "refresh_token"}
+	}
+	if len(req.ResponseTypes) == 0 {
+		req.ResponseTypes = []string{"code"}
+	}
+	if req.TokenEndpointAuthMethod == "" {
+		req.TokenEndpointAuthMethod = "client_secret_post"
+	}
+	if req.ClientName == "" {
+		req.ClientName = req.ClientID
+	}
+
+	// Get current user ID from context (set by AdminAuth middleware)
+	userID := c.GetInt("id")
+
+	// Determine client type based on whether secret is provided
+	clientType := model.OAuthClientTypeConfidential
+	if req.ClientSecret == "" {
+		clientType = model.OAuthClientTypePublic
+	}
+
+	// Create client in Hydra
+	client, err := ctrl.hydra.CreateOAuth2Client(
+		c.Request.Context(),
+		req.ClientID,
+		req.ClientSecret,
+		req.ClientName,
+		req.GrantTypes,
+		req.ResponseTypes,
+		req.RedirectURIs,
+		req.Scope,
+		req.TokenEndpointAuthMethod,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "failed to create client: " + err.Error(),
+		})
+		return
+	}
+
+	// Save client ownership to database
+	oauthClient := &model.OAuthClient{
+		HydraClientID: req.ClientID,
+		UserID:        userID,
+		ClientName:    req.ClientName,
+		ClientType:    clientType,
+		AllowedScopes: req.Scope,
+		RedirectURIs:  strings.Join(req.RedirectURIs, ","),
+	}
+	if err := model.CreateOAuthClient(oauthClient); err != nil {
+		// Log the error but don't fail the request since client was created in Hydra
+		common.SysError("failed to save oauth client ownership: " + err.Error())
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    client,
+	})
+}
+
+// OAuthListClients handles GET /oauth/admin/clients - lists all OAuth clients (admin only)
+func (ctrl *OAuthProviderController) OAuthListClients(c *gin.Context) {
+	clients, err := ctrl.hydra.ListOAuth2Clients(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "failed to list clients: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    clients,
+	})
+}
+
+// OAuthDeleteClient handles DELETE /oauth/admin/clients/:id - deletes an OAuth client (admin only)
+func (ctrl *OAuthProviderController) OAuthDeleteClient(c *gin.Context) {
+	clientID := c.Param("id")
+	if clientID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "client_id is required",
+		})
+		return
+	}
+
+	// Delete from Hydra
+	if err := ctrl.hydra.DeleteOAuth2Client(c.Request.Context(), clientID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "failed to delete client: " + err.Error(),
+		})
+		return
+	}
+
+	// Delete from our database (ignore error since Hydra deletion succeeded)
+	if err := model.DeleteOAuthClientByHydraID(clientID); err != nil {
+		common.SysError("failed to delete oauth client from database: " + err.Error())
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "client deleted",
+	})
 }

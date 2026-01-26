@@ -44,4 +44,14 @@ func SetOAuthProviderRouter(router *gin.Engine) {
 		// GET /oauth/logout - Hydra redirects here, handles logout
 		oauthRoute.GET("/logout", ctrl.OAuthLogout)
 	}
+
+	// Admin client management routes (requires admin auth)
+	adminClients := router.Group("/oauth/admin/clients")
+	adminClients.Use(middleware.GlobalAPIRateLimit())
+	adminClients.Use(middleware.AdminAuth())
+	{
+		adminClients.GET("", ctrl.OAuthListClients)
+		adminClients.POST("", ctrl.OAuthRegisterClient)
+		adminClients.DELETE("/:id", ctrl.OAuthDeleteClient)
+	}
 }
