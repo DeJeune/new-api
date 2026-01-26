@@ -2113,6 +2113,26 @@
     "统一的": "The Unified",
     "大模型接口网关": "LLM API Gateway",
     "正在跳转 GitHub...": "Redirecting to GitHub...",
-    "请求超时，请刷新页面后重新发起 GitHub 登录": "Request timed out, please refresh and restart GitHub login"
+    "请求超时，请刷新页面后重新发起 GitHub 登录": "Request timed out, please refresh and restart GitHub login",
+    "缺少 login_challenge 参数": "Missing login_challenge parameter",
+    "获取客户端信息失败": "Failed to fetch client information",
+    "错误": "Error",
+    "请输入您的验证器应用中的验证码": "Please enter the verification code from your authenticator app",
+    "请输入6位验证码": "Please enter 6-digit verification code",
+    "验证": "Verify",
+    "返回登录": "Back to Login",
+    "第三方应用": "Third-party Application",
+    "请求访问您的账户": "is requesting access to your account",
+    "登录后，该应用将获得以下权限：": "After login, this application will have access to:",
+    "缺少 consent_challenge 参数": "Missing consent_challenge parameter",
+    "获取授权信息失败": "Failed to fetch consent information",
+    "请求以下权限": "is requesting the following permissions",
+    "授权失败": "Authorization failed",
+    "授权失败，请重试": "Authorization failed, please try again",
+    "操作失败": "Operation failed",
+    "操作失败，请重试": "Operation failed, please try again",
+    "拒绝": "Deny",
+    "授权": "Authorize",
+    "授权后，该应用将获得上述所有权限": "By authorizing, you grant this application all the permissions listed above"
   }
 }
