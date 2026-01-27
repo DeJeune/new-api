@@ -36,6 +36,7 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 COPY --from=builder2 /build/new-api /
 COPY --from=hydra /usr/bin/hydra /usr/bin/hydra
 COPY docker/entrypoint-allinone.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 EXPOSE 3000 4444
 WORKDIR /data
 ENTRYPOINT ["/entrypoint.sh"]
