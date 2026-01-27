@@ -15,7 +15,6 @@ ARG TARGETOS
 ARG TARGETARCH
 ENV GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64}
 
-
 WORKDIR /build
 
 ADD go.mod go.sum ./
@@ -25,6 +24,8 @@ COPY . .
 COPY --from=builder /build/dist ./web/dist
 RUN go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$(cat VERSION)'" -o new-api
 
+FROM oryd/hydra:v25.4.0 AS hydra
+
 FROM alpine
 
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
@@ -33,6 +34,8 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
     && update-ca-certificates
 
 COPY --from=builder2 /build/new-api /
-EXPOSE 3000
+COPY --from=hydra /usr/bin/hydra /usr/bin/hydra
+COPY docker/entrypoint-allinone.sh /entrypoint.sh
+EXPOSE 3000 4444
 WORKDIR /data
-ENTRYPOINT ["/new-api"]
+ENTRYPOINT ["/entrypoint.sh"]
