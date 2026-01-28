@@ -12,11 +12,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// OAuth paths that should be rewritten to use the request's host/scheme
-var oauthRedirectPaths = []string{
-	"/oauth/login",
-	"/oauth/consent",
-	"/oauth/logout",
+// Hydra fallback paths -> new-api OAuth paths
+var oauthPathMapping = map[string]string{
+	"/oauth2/fallbacks/login":   "/oauth/login",
+	"/oauth2/fallbacks/consent": "/oauth/consent",
+	"/oauth2/fallbacks/logout":  "/oauth/logout",
+	"/oauth/login":              "/oauth/login",
+	"/oauth/consent":            "/oauth/consent",
+	"/oauth/logout":             "/oauth/logout",
 }
 
 // SetHydraPublicProxyRouter proxies Hydra public endpoints through new-api.
@@ -55,7 +58,6 @@ func createHydraProxy(target *url.URL, originalReq *http.Request) *httputil.Reve
 	defaultDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		defaultDirector(req)
-		// Pass original request info to Hydra
 		if requestHost != "" {
 			req.Header.Set("X-Forwarded-Host", requestHost)
 		}
@@ -69,7 +71,6 @@ func createHydraProxy(target *url.URL, originalReq *http.Request) *httputil.Reve
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 	}
 
-	// Rewrite OAuth redirect URLs to use the current request's host/scheme
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		return rewriteOAuthRedirect(resp, requestHost, requestScheme)
 	}
@@ -77,13 +78,10 @@ func createHydraProxy(target *url.URL, originalReq *http.Request) *httputil.Reve
 	return proxy
 }
 
-// getRequestScheme determines the scheme from the original request.
 func getRequestScheme(req *http.Request) string {
-	// Check X-Forwarded-Proto first (most common)
 	if proto := req.Header.Get("X-Forwarded-Proto"); proto != "" {
 		return strings.ToLower(strings.TrimSpace(proto))
 	}
-	// Check TLS
 	if req.TLS != nil {
 		return "https"
 	}
@@ -91,6 +89,7 @@ func getRequestScheme(req *http.Request) string {
 }
 
 // rewriteOAuthRedirect rewrites OAuth redirect URLs to use the request's host/scheme.
+// Also maps Hydra fallback paths to new-api OAuth paths.
 func rewriteOAuthRedirect(resp *http.Response, requestHost, requestScheme string) error {
 	if resp.StatusCode < 300 || resp.StatusCode >= 400 {
 		return nil
@@ -102,17 +101,22 @@ func rewriteOAuthRedirect(resp *http.Response, requestHost, requestScheme string
 	}
 
 	locURL, err := url.Parse(location)
-	if err != nil || locURL.Host == "" {
+	if err != nil {
 		return nil
 	}
 
-	// Only rewrite OAuth paths
-	if !isOAuthPath(locURL.Path) {
+	// Check if this is an OAuth path that needs rewriting
+	newPath := mapOAuthPath(locURL.Path)
+	if newPath == "" {
 		return nil
 	}
 
-	// Rewrite to request's host/scheme
 	oldLocation := location
+
+	// Rewrite path (e.g., /oauth2/fallbacks/login -> /oauth/login)
+	locURL.Path = newPath + strings.TrimPrefix(locURL.Path, extractBasePath(locURL.Path))
+
+	// Rewrite host and scheme to match the original request
 	locURL.Host = requestHost
 	locURL.Scheme = requestScheme
 
@@ -122,11 +126,22 @@ func rewriteOAuthRedirect(resp *http.Response, requestHost, requestScheme string
 	return nil
 }
 
-func isOAuthPath(path string) bool {
-	for _, p := range oauthRedirectPaths {
-		if strings.HasPrefix(path, p) {
-			return true
+// mapOAuthPath returns the new-api OAuth path for a given path, or empty string if not an OAuth path.
+func mapOAuthPath(path string) string {
+	for prefix, newPath := range oauthPathMapping {
+		if strings.HasPrefix(path, prefix) {
+			return newPath
 		}
 	}
-	return false
+	return ""
+}
+
+// extractBasePath extracts the base OAuth path from a full path.
+func extractBasePath(path string) string {
+	for prefix := range oauthPathMapping {
+		if strings.HasPrefix(path, prefix) {
+			return prefix
+		}
+	}
+	return ""
 }
