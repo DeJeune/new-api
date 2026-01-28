@@ -12,14 +12,21 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Hydra fallback paths -> new-api OAuth paths
+// Hydra paths -> target paths (for redirect rewriting)
 var oauthPathMapping = map[string]string{
+	// Hydra fallback paths -> new-api OAuth paths
 	"/oauth2/fallbacks/login":   "/oauth/login",
 	"/oauth2/fallbacks/consent": "/oauth/consent",
 	"/oauth2/fallbacks/logout":  "/oauth/logout",
-	"/oauth/login":              "/oauth/login",
-	"/oauth/consent":            "/oauth/consent",
-	"/oauth/logout":             "/oauth/logout",
+	// Configured OAuth paths (keep same path, just rewrite host)
+	"/oauth/login":   "/oauth/login",
+	"/oauth/consent": "/oauth/consent",
+	"/oauth/logout":  "/oauth/logout",
+	// Hydra internal paths (keep same path, just rewrite host)
+	"/oauth2/auth":     "/oauth2/auth",
+	"/oauth2/token":    "/oauth2/token",
+	"/oauth2/revoke":   "/oauth2/revoke",
+	"/oauth2/sessions": "/oauth2/sessions",
 }
 
 // SetHydraPublicProxyRouter proxies Hydra public endpoints through new-api.
