@@ -12,6 +12,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// OAuth paths that should be rewritten to use the request's host/scheme
+var oauthRedirectPaths = []string{
+	"/oauth/login",
+	"/oauth/consent",
+	"/oauth/logout",
+}
+
 // SetHydraPublicProxyRouter proxies Hydra public endpoints through new-api.
 func SetHydraPublicProxyRouter(router *gin.Engine) {
 	if !common.HydraEnabled {
@@ -39,7 +46,7 @@ func SetHydraPublicProxyRouter(router *gin.Engine) {
 	})
 }
 
-// createHydraProxy creates a reverse proxy with URL rewriting support for multi-domain setup.
+// createHydraProxy creates a reverse proxy with automatic URL rewriting for OAuth redirects.
 func createHydraProxy(target *url.URL, requestHost, requestScheme string) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	defaultDirector := proxy.Director
@@ -58,14 +65,11 @@ func createHydraProxy(target *url.URL, requestHost, requestScheme string) *httpu
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 	}
 
-	// If HYDRA_BASE_HOST is configured, rewrite redirect URLs to use the current request's host
-	baseHost := strings.TrimSpace(common.HydraBaseHost)
-	if baseHost != "" && requestHost != "" && !hostMatches(requestHost, baseHost) {
+	// Always rewrite OAuth redirect URLs to use the current request's host/scheme
+	if requestHost != "" {
 		proxy.ModifyResponse = func(resp *http.Response) error {
-			return rewriteRedirectLocation(resp, baseHost, requestHost, requestScheme)
+			return rewriteOAuthRedirect(resp, requestHost, requestScheme)
 		}
-	} else if baseHost == "" {
-		common.SysLog("HYDRA_BASE_HOST is not configured, URL rewriting disabled")
 	}
 
 	return proxy
@@ -130,9 +134,9 @@ func parseCFVisitorScheme(cfVisitor string) string {
 	return ""
 }
 
-// rewriteRedirectLocation rewrites the Location header in redirect responses
-// to replace the base host with the current request's host.
-func rewriteRedirectLocation(resp *http.Response, baseHost, requestHost, requestScheme string) error {
+// rewriteOAuthRedirect rewrites OAuth redirect URLs (login, consent, logout) to use the request's host/scheme.
+// This allows multi-domain setups without needing to configure HYDRA_BASE_HOST.
+func rewriteOAuthRedirect(resp *http.Response, requestHost, requestScheme string) error {
 	// Only process redirect responses
 	if resp.StatusCode < 300 || resp.StatusCode >= 400 {
 		return nil
@@ -146,54 +150,44 @@ func rewriteRedirectLocation(resp *http.Response, baseHost, requestHost, request
 	// Parse the location URL
 	locURL, err := url.Parse(location)
 	if err != nil {
-		return nil // Don't fail on parse error, just skip rewriting
+		return nil
 	}
 
-	// Check if the location host matches the base host (with or without port)
-	locHost := locURL.Host
-	if locHost == "" {
-		return nil // Relative URL, no rewriting needed
+	// Check if this is an OAuth redirect path
+	if !isOAuthRedirectPath(locURL.Path) {
+		return nil
 	}
 
-	// Strip port from hosts for comparison
-	locHostWithoutPort := stripPort(locHost)
-	baseHostWithoutPort := stripPort(baseHost)
+	oldLocation := location
+	needRewrite := false
 
-	if locHostWithoutPort == baseHostWithoutPort {
-		oldLocation := location
-		// Rewrite the host to the request host
+	// Rewrite host if different
+	if locURL.Host != requestHost && locURL.Host != "" {
 		locURL.Host = requestHost
+		needRewrite = true
+	}
 
-		// Use the actual request scheme
-		if requestScheme != "" {
-			locURL.Scheme = requestScheme
-		}
+	// Rewrite scheme if different
+	if requestScheme != "" && locURL.Scheme != requestScheme {
+		locURL.Scheme = requestScheme
+		needRewrite = true
+	}
 
+	if needRewrite {
 		newLocation := locURL.String()
 		resp.Header.Set("Location", newLocation)
-		common.SysLog(fmt.Sprintf("hydra proxy rewrite: %s -> %s (scheme=%s)", oldLocation, newLocation, requestScheme))
+		common.SysLog(fmt.Sprintf("hydra proxy rewrite: %s -> %s", oldLocation, newLocation))
 	}
 
 	return nil
 }
 
-// stripPort removes the port from a host string.
-func stripPort(host string) string {
-	if idx := strings.LastIndex(host, ":"); idx != -1 {
-		// Make sure it's not an IPv6 address
-		if strings.Contains(host, "]") {
-			// IPv6: [::1]:8080
-			if bracketIdx := strings.LastIndex(host, "]"); bracketIdx < idx {
-				return host[:idx]
-			}
-		} else {
-			return host[:idx]
+// isOAuthRedirectPath checks if the path is an OAuth redirect path that should be rewritten.
+func isOAuthRedirectPath(path string) bool {
+	for _, p := range oauthRedirectPaths {
+		if strings.HasPrefix(path, p) {
+			return true
 		}
 	}
-	return host
-}
-
-// hostMatches checks if two hosts are the same (ignoring port).
-func hostMatches(host1, host2 string) bool {
-	return stripPort(host1) == stripPort(host2)
+	return false
 }
